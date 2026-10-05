@@ -1,0 +1,46 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "wsi-converter"
+version = "0.1.0"
+description = "Assess, inspect, convert, and verify whole-slide images"
+readme = "README.md"
+requires-python = ">=3.10"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Chima Eke" }]
+dependencies = [
+    "openslide-python>=1.4",
+    "openslide-bin>=4.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8", 
+    "pytest-cov>=5",
+    "ruff>=0.5", 
+    "mypy>=1.10"
+]
+
+[project.scripts]
+wsi-converter = "wsi_converter.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.mypy]
+python_version = "3.10"
+strict = true
+packages = ["wsi_converter"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "integration: requires OpenSlide/Bio-Formats and external WSI data"
+]
