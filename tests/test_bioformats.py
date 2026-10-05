@@ -2,6 +2,9 @@
 
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
+
+import pytest
 
 from wsi_converter.backends.bioformats.backend import parse_showinf
 from wsi_converter.backends.bioformats.runner import BioFormatsRunner
@@ -71,7 +74,9 @@ Layer: Macro
     assert series[1].raw_metadata["Layer"] == "Macro"
 
 
-def test_runner_only_requests_ome_xml_when_requested(tmp_path: Path, monkeypatch) -> None:
+def test_runner_only_requests_ome_xml_when_requested(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Keep output verification compact while allowing full source discovery."""
     executable = tmp_path / "showinf"
     executable.touch()
@@ -79,7 +84,7 @@ def test_runner_only_requests_ome_xml_when_requested(tmp_path: Path, monkeypatch
     source.touch()
     calls: list[list[str]] = []
 
-    def fake_run(command, **_kwargs):
+    def fake_run(command: list[str], **_kwargs: Any) -> SimpleNamespace:
         calls.append(command)
         return SimpleNamespace(returncode=0, stdout="", stderr="")
 
@@ -94,7 +99,9 @@ def test_runner_only_requests_ome_xml_when_requested(tmp_path: Path, monkeypatch
     assert calls[1].count("-omexml") == 1
 
 
-def test_runner_forces_bigtiff_without_enabling_compression(tmp_path: Path, monkeypatch) -> None:
+def test_runner_forces_bigtiff_without_enabling_compression(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Write large OME-TIFFs with 64-bit offsets and preserve uncompressed pixels."""
     executable = tmp_path / "bfconvert"
     executable.touch()
@@ -103,7 +110,7 @@ def test_runner_forces_bigtiff_without_enabling_compression(tmp_path: Path, monk
     output = tmp_path / "converted.ome.tiff"
     calls: list[list[str]] = []
 
-    def fake_run(command, **_kwargs):
+    def fake_run(command: list[str], **_kwargs: Any) -> SimpleNamespace:
         calls.append(command)
         return SimpleNamespace(returncode=0, stdout="", stderr="")
 
@@ -118,7 +125,9 @@ def test_runner_forces_bigtiff_without_enabling_compression(tmp_path: Path, monk
     assert "-compression" not in calls[0]
 
 
-def test_runner_passes_requested_compression_method(tmp_path: Path, monkeypatch) -> None:
+def test_runner_passes_requested_compression_method(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Pass a requested codec directly to Bio-Formats without changing defaults."""
     executable = tmp_path / "bfconvert"
     executable.touch()
@@ -127,7 +136,7 @@ def test_runner_passes_requested_compression_method(tmp_path: Path, monkeypatch)
     output = tmp_path / "converted.ome.tiff"
     calls: list[list[str]] = []
 
-    def fake_run(command, **_kwargs):
+    def fake_run(command: list[str], **_kwargs: Any) -> SimpleNamespace:
         calls.append(command)
         return SimpleNamespace(returncode=0, stdout="", stderr="")
 
@@ -142,10 +151,10 @@ def test_runner_passes_requested_compression_method(tmp_path: Path, monkeypatch)
     ]
 
 
-def test_runner_rejects_empty_compression_method_before_launch(tmp_path: Path, monkeypatch) -> None:
+def test_runner_rejects_empty_compression_method_before_launch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Reject a blank codec instead of silently falling back to uncompressed output."""
-    import pytest
-
     from wsi_converter.exceptions import ConversionError
 
     executable = tmp_path / "bfconvert"
