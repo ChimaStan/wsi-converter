@@ -11,7 +11,7 @@ uv python install
 uv sync --locked --group dev
 ```
 
-The project uses Python versions declared by `.python-version`; `uv.lock` pins the Python dependencies. Java, Bio-Formats, and any system-provided OpenSlide library are external runtimes and are not installed by uv. See the [external runtime record](docs/external-runtime.md) for the container's runtime versions and locations.
+The project uses the Python version declared by `.python-version`; `uv.lock` pins the Python dependencies, including `openslide-python` and `openslide-bin`. The latter supplies the OpenSlide native library in the standard environment. Java and Bio-Formats are external runtimes and are not installed or managed by uv. If a deployment substitutes an OS-provided OpenSlide library for `openslide-bin`, that system dependency is also external to uv. See the [external runtime record](docs/external-runtime.md) for deployment versions and locations.
 
 After changing dependency declarations in `pyproject.toml`, run `uv lock` and commit the updated `uv.lock`. Use `uv sync --locked` to ensure the environment matches the committed lockfile.
 
