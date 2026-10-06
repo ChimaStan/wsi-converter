@@ -4,11 +4,14 @@ import errno
 from pathlib import Path
 from typing import cast
 
+import pytest
+
 from wsi_converter.backends.base import WSIBackend
 from wsi_converter.models import (
     AssessmentStatus,
     ConversionResult,
     OpenSlideAssessment,
+    OpenSlideRequirements,
     SeriesClassification,
     SeriesInfo,
 )
@@ -24,7 +27,9 @@ from wsi_converter.pipeline import (
 class Checker:
     """Fixed compatible checker used to exercise source and output branches."""
 
-    def check(self, path: Path, _requirements=None) -> OpenSlideAssessment:
+    def check(
+        self, path: Path, _requirements: OpenSlideRequirements | None = None
+    ) -> OpenSlideAssessment:
         return OpenSlideAssessment(
             path=path, status=AssessmentStatus.COMPATIBLE,
             dimensions=(10000, 8000), level_count=3,
@@ -232,13 +237,13 @@ def test_flat_verification_accepts_single_series_without_resolution_count() -> N
 
 
 def test_publish_verified_uses_rename_when_hard_links_are_unsupported(
-    tmp_path: Path, monkeypatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     staging = tmp_path / "staging.ome.tiff"
     destination = tmp_path / "accepted.ome.tiff"
     staging.write_bytes(b"verified image")
 
-    def reject_hardlink(_source, _destination):
+    def reject_hardlink(_source: object, _destination: object) -> None:
         raise OSError(errno.EPERM, "hard links are unsupported")
 
     monkeypatch.setattr("wsi_converter.pipeline.os.link", reject_hardlink)
