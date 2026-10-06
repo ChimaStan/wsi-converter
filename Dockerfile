@@ -17,7 +17,8 @@ RUN apt-get update \
 
 # Fetch a versioned OME release, verify both the tool bundle and corresponding
 # source archive against OME's published checksums, and retain the source and
-# checksum list for redistribution notices and reproducibility.
+# checksum list for redistribution notices and reproducibility. The tools
+# archive extracts into a top-level bftools/ directory.
 RUN set -eux; \
     download_dir="$(mktemp -d)"; \
     release_url="https://downloads.openmicroscopy.org/bio-formats/${BIOFORMATS_VERSION}/artifacts"; \
@@ -36,9 +37,9 @@ RUN set -eux; \
     (cd "${download_dir}" && sha256sum --check selected-shasums); \
     mkdir -p "${BIOFORMATS_HOME}" /usr/share/doc/wsi-converter; \
     unzip -q "${download_dir}/bftools.zip" -d "${BIOFORMATS_HOME}"; \
-    test -f "${BIOFORMATS_HOME}/bfconvert"; \
-    test -f "${BIOFORMATS_HOME}/showinf"; \
-    chmod 0755 "${BIOFORMATS_HOME}/bfconvert" "${BIOFORMATS_HOME}/showinf"; \
+    test -f "${BIOFORMATS_HOME}/bftools/bfconvert"; \
+    test -f "${BIOFORMATS_HOME}/bftools/showinf"; \
+    chmod 0755 "${BIOFORMATS_HOME}/bftools/bfconvert" "${BIOFORMATS_HOME}/bftools/showinf"; \
     install -m 0644 "${download_dir}/bioformats-${BIOFORMATS_VERSION}.zip" \
         "/usr/share/doc/wsi-converter/bioformats-${BIOFORMATS_VERSION}-source.zip"; \
     install -m 0644 "${download_dir}/SHASUMS" \
@@ -50,7 +51,7 @@ FROM ghcr.io/astral-sh/uv:0.12.22 AS uv
 FROM ${PYTHON_BASE_IMAGE} AS runtime
 ARG BIOFORMATS_VERSION=8.5.0
 
-ENV BIOFORMATS_HOME=/opt/bioformats \
+ENV BIOFORMATS_HOME=/opt/bioformats/bftools \
     UV_PROJECT_ENVIRONMENT=/opt/venv \
     UV_PYTHON_DOWNLOADS=never \
     UV_COMPILE_BYTECODE=1 \

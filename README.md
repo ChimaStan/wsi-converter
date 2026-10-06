@@ -24,7 +24,7 @@ For development setup, tests, and quality checks, see [CONTRIBUTING.md](CONTRIBU
 
 Outside the supplied Docker image, Bio-Formats and Java are external runtime prerequisites; they are not Python dependencies managed by uv. They can be found on `PATH`, configured with `BIOFORMATS_HOME`, or configured per command with `--bioformats-home`, `--bfconvert`, and `--showinf`. The Docker image below includes pinned Bio-Formats and Java versions.
 
-The package does not require QuPath, Fiji, ImageJ, or a graphical environment. `uv.lock` pins the Python packages, including `openslide-bin`; it does not pin Java, Bio-Formats, or operating-system libraries.
+The package does not require QuPath, Fiji, ImageJ, or a graphical environment. `uv.lock` pins the Python packages, including `openslide-bin` and its native OpenSlide distribution. It does not pin Java, Bio-Formats, the operating-system base image, or OS libraries installed separately from Python packages.
 
 ## CLI reference
 
@@ -230,7 +230,7 @@ See [HPC and deployment](#hpc-and-deployment) for Apptainer use and runtime reco
 
 ## HPC and deployment
 
-For reproducible deployments, pin the container image by digest and record Java, Bio-Formats, and base OS versions separately from `uv.lock`. The lockfile covers the Python environment, including the `openslide-bin` native OpenSlide distribution. For environments using a system-provided OpenSlide library instead, record that native library separately. The package works in headless Docker and Apptainer/Singularity jobs; Bio-Formats can be included in the image or mounted and configured through `BIOFORMATS_HOME`, `--bioformats-home`, `--bfconvert`, or `--showinf`.
+For reproducible deployments, pin the container image by digest and record Java, Bio-Formats, and base OS versions separately from `uv.lock`. The lockfile covers the Python environment, including the `openslide-bin` package and its bundled native OpenSlide distribution. If a deployment uses a system-provided OpenSlide library instead, record that library's version and path separately because it is outside the uv environment. The package works in headless Docker and Apptainer/Singularity jobs; Bio-Formats can be included in the image or mounted and configured through `BIOFORMATS_HOME`, `--bioformats-home`, `--bfconvert`, or `--showinf`.
 
 Example Apptainer invocation when Bio-Formats is supplied from a mounted directory:
 
@@ -240,7 +240,7 @@ apptainer exec --bind /path/to/bioformats:/opt/bioformats \
   uv run wsi-converter doctor
 ```
 
-Record at least the Java vendor/version/path, Bio-Formats release and executable paths, OpenSlide native version/library path, and container image digest/base OS release with each deployment. Use the separate [external runtime record](docs/external-runtime.md) for deployment details.
+Record at least the Java vendor/version/path, Bio-Formats release and executable paths, OpenSlide native version/path and whether it comes from locked `openslide-bin` or a system library, and container image digest/base OS release with each deployment. Use the separate [external runtime record](docs/external-runtime.md) for deployment details.
 
 ## Acknowledgements and citation
 
