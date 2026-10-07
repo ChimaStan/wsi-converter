@@ -8,6 +8,86 @@ CHECK → INSPECT → SELECT → CONVERT → VERIFY → REPORT
 
 The actual file is tested. File extensions help directory discovery and diagnostics, but do not decide whether OpenSlide can use an image. Compatible sources can continue through an existing OpenSlide workflow without conversion.
 
+## Container use
+
+The public image is available from the [wsi-converter GHCR package](https://github.com/users/ChimaStan/packages/container/package/wsi-converter). Release `0.1.0` currently targets `linux/amd64`. It includes Java 17 and Bio-Formats 8.5.0; Bio-Formats is configured inside the image, so no host Bio-Formats or Java installation is needed.
+
+### Apptainer or Singularity
+
+Pull the image to a SIF file:
+
+```bash
+apptainer pull wsi-converter_0.1.0.sif \
+  docker://ghcr.io/chimastan/wsi-converter:0.1.0
+```
+
+Optionally check the bundled tools:
+
+```bash
+apptainer exec wsi-converter_0.1.0.sif wsi-converter doctor
+```
+
+Create a writable output directory on the host. Bind the WSI directory read-only and the output directory into the container:
+
+```bash
+mkdir -p /path/to/converted
+
+apptainer exec \
+  --bind /path/to/wsis:/input:ro \
+  --bind /path/to/converted:/output \
+  wsi-converter_0.1.0.sif \
+  wsi-converter convert /input --recursive --output /output \
+    --json /output/report.json
+```
+
+Replace the host paths with your data and output locations; `/input` and `/output` are paths inside the container. The container runs as your HPC account, so the output directory must be writable by you. Progress appears in the job's standard output; the JSON report is written to the bound output directory. If your cluster provides Singularity instead, substitute `singularity` for `apptainer` in the pull and exec commands. See the [Apptainer container documentation](https://apptainer.org/docs/user/latest/docker_and_oci.html) for registry pulls and bind mounts.
+
+### Docker
+
+Pull and check the image:
+
+```bash
+docker pull ghcr.io/chimastan/wsi-converter:0.1.0
+docker run --rm ghcr.io/chimastan/wsi-converter:0.1.0 doctor
+```
+
+For conversion, create a writable output directory and mount your inputs and outputs:
+
+```bash
+mkdir -p /path/to/converted
+
+docker run --rm --user "$(id -u):$(id -g)" \
+  --volume /path/to/wsis:/input:ro \
+  --volume /path/to/converted:/output \
+  ghcr.io/chimastan/wsi-converter:0.1.0 \
+  convert /input --recursive --output /output --json /output/report.json
+```
+
+Replace the host paths with your data and output locations; `/input` and `/output` are paths inside the container.
+
+### Override the bundled Bio-Formats installation
+
+The image's `BIOFORMATS_HOME` already points to its bundled Bio-Formats tools. Override it only when you need another release. Mount the directory containing `bfconvert` and `showinf`, then set `BIOFORMATS_HOME` to that directory's container path. For example, if the extracted Bio-Formats archive contains a nested `bftools/` directory, Apptainer/Singularity users can run:
+
+```bash
+apptainer exec \
+  --bind /path/to/bioformats/bftools:/external/bioformats:ro \
+  --env BIOFORMATS_HOME=/external/bioformats \
+  wsi-converter_0.1.0.sif \
+  wsi-converter doctor
+```
+
+With Docker, add the corresponding volume and environment options to the command:
+
+```bash
+docker run --rm \
+  --volume /path/to/bioformats/bftools:/external/bioformats:ro \
+  --env BIOFORMATS_HOME=/external/bioformats \
+  ghcr.io/chimastan/wsi-converter:0.1.0 doctor
+```
+
+Use the same mount and environment options with `convert` to run a conversion using that Bio-Formats installation. The mounted directory must contain executable `bfconvert` and `showinf` files.
+
 ## Python environment
 
 For a local installation, use uv for the project interpreter, environment, and Python dependencies. The checked-in `.python-version` selects the project's Python version; `pyproject.toml` declares runtime dependencies, and `uv.lock` pins their resolved versions.
@@ -22,7 +102,7 @@ For development setup, tests, and quality checks, see [CONTRIBUTING.md](CONTRIBU
 
 `openslide-python` is the Python binding and `openslide-bin` supplies OpenSlide native binaries. They are distinct components, and both are declared as Python dependencies and pinned by `uv.lock`. On platforms with a compatible `openslide-bin` wheel, `uv sync` installs the native library that the binding loads. The `doctor` command checks the binding and native library separately. If a compatible wheel is unavailable and you use an OS-provided native library, record and configure that system dependency separately.
 
-Outside the supplied Docker image, Bio-Formats and Java are external runtime prerequisites; they are not Python dependencies managed by uv. They can be found on `PATH`, configured with `BIOFORMATS_HOME`, or configured per command with `--bioformats-home`, `--bfconvert`, and `--showinf`. The Docker image below includes pinned Bio-Formats and Java versions.
+Outside the supplied Docker image, Bio-Formats and Java are external runtime prerequisites; they are not Python dependencies managed by uv. They can be found on `PATH`, configured with `BIOFORMATS_HOME`, or configured per command with `--bioformats-home`, `--bfconvert`, and `--showinf`. The Docker image includes Bio-Formats 8.5.0 and OpenJDK 17.
 
 The package does not require QuPath, Fiji, ImageJ, or a graphical environment. `uv.lock` pins the Python packages, including `openslide-bin` and its native OpenSlide distribution. It does not pin Java, Bio-Formats, the operating-system base image, or OS libraries installed separately from Python packages.
 
@@ -212,38 +292,8 @@ uv run wsi-converter doctor --bioformats-home path/to/bioformats
 
 It reports Python and package versions/locations, distinguishes the `openslide-python` binding from the native OpenSlide library, checks `bfconvert` and `showinf`, and probes Java and Bio-Formats versions where possible. It reports missing components and does not install, update, or configure software.
 
-## Container use
+## Acknowledgements
 
-The Docker image is published to the [wsi-converter GHCR package](https://github.com/users/ChimaStan/packages/container/package/wsi-converter). The package page lists available tags and access details; it will show the image after the first release is published. Mount your WSI input read-only and choose an output directory writable by the container user. The image's `BIOFORMATS_HOME` is configured internally; users can override it by mounting another Bio-Formats installation and setting the container path.
-
-```bash
-docker run --rm --user "$(id -u):$(id -g)" \
-  --volume /path/to/wsis:/input:ro \
-  --volume /path/to/converted:/output \
-  ghcr.io/chimastan/wsi-converter:0.1.0 \
-  convert /input --recursive --output /output --json /output/report.json
-```
-
-Replace the absolute host mount paths and image version with values appropriate for your system. The paths `/input` and `/output` are inside the container. For an alternate Bio-Formats release, mount its tools directory and set `BIOFORMATS_HOME`, for example `--volume /path/to/other-bioformats:/external/bioformats:ro --env BIOFORMATS_HOME=/external/bioformats`.
-
-See [HPC and deployment](#hpc-and-deployment) for Apptainer use and runtime recording. To build or publish the image, see [CONTRIBUTING.md](CONTRIBUTING.md).
-
-## HPC and deployment
-
-For reproducible deployments, pin the container image by digest and record Java, Bio-Formats, and base OS versions separately from `uv.lock`. The lockfile covers the Python environment, including the `openslide-bin` package and its bundled native OpenSlide distribution. If a deployment uses a system-provided OpenSlide library instead, record that library's version and path separately because it is outside the uv environment. The package works in headless Docker and Apptainer/Singularity jobs; Bio-Formats can be included in the image or mounted and configured through `BIOFORMATS_HOME`, `--bioformats-home`, `--bfconvert`, or `--showinf`.
-
-Example Apptainer invocation when Bio-Formats is supplied from a mounted directory:
-
-```bash
-apptainer exec --bind /path/to/bioformats:/opt/bioformats \
-  --env BIOFORMATS_HOME=/opt/bioformats path/to/wsi-converter.sif \
-  uv run wsi-converter doctor
-```
-
-Record at least the Java vendor/version/path, Bio-Formats release and executable paths, OpenSlide native version/path and whether it comes from locked `openslide-bin` or a system library, and container image digest/base OS release with each deployment. Use the separate [external runtime record](docs/external-runtime.md) for deployment details.
-
-## Acknowledgements and citation
-
-This project uses [Bio-Formats](https://www.openmicroscopy.org/bio-formats/), developed by the Open Microscopy Environment. Its [recommended citation](https://bio-formats.readthedocs.io/en/stable/about/index.html) is:
+This project uses [Bio-Formats](https://www.openmicroscopy.org/bio-formats/), developed by the Open Microscopy Environment. The [Bio-Formats documentation](https://bio-formats.readthedocs.io/en/stable/about/index.html) provides the recommended citation:
 
 > Melissa Linkert, Curtis T. Rueden, Chris Allan, Jean-Marie Burel, Will Moore, Andrew Patterson, Brian Loranger, Josh Moore, Carlos Neves, Donald MacDonald, Aleksandra Tarkowska, Caitlin Sticco, Emma Hill, Mike Rossner, Kevin W. Eliceiri, and Jason R. Swedlow (2010). Metadata matters: access to image data in the real world. *The Journal of Cell Biology*, 189(5), 777–782. https://doi.org/10.1083/jcb.201004104
