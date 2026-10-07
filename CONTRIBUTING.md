@@ -59,13 +59,13 @@ docker run --rm wsi-converter:local doctor
 
 The Dockerfile pins the Python base image, installs Java, and downloads a versioned Bio-Formats bundle with checksum verification. The Python packages, including `openslide-bin`, come from `uv.lock`. The image build runs `wsi-converter doctor` and fails if its runtime dependencies are unavailable.
 
-The `publish-ghcr.yml` workflow publishes only when a tag beginning with `v` is pushed. After release changes are merged to `main`, create and push a tag matching the version in `pyproject.toml`, for example:
+The `publish-ghcr.yml` workflow publishes only when a tag beginning with `v` is pushed. After release changes are merged to `main`, create and push a new tag matching the version in `pyproject.toml`. The `v0.1.0` tag has already been published; do not reuse or move it for a later release. For a future release, replace `X.Y.Z` below with the new project version:
 
 ```bash
 git switch main
 git pull --ff-only origin main
-git tag -a v0.1.0 -m "Release v0.1.0"
-git push origin v0.1.0
+git tag -a vX.Y.Z -m "Release vX.Y.Z"
+git push origin vX.Y.Z
 ```
 
 The release workflow reruns Ruff, mypy, and pytest, builds a `linux/amd64` image, runs `wsi-converter doctor` inside it, then publishes to GHCR if those checks pass. It creates semantic-version and commit-SHA image tags and includes provenance and an SBOM. Pull requests and ordinary branch pushes run CI but do not publish the image.
