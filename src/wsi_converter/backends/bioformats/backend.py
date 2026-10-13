@@ -274,4 +274,4 @@ def _now() -> str:
     Returns:
         Timezone-aware UTC timestamp string.
     """
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
