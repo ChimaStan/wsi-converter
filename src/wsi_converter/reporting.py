@@ -100,6 +100,64 @@ def check_csv_text(results: list[OpenSlideAssessment]) -> str:
     return buffer.getvalue()
 
 
+def write_conversion_csv(report: dict[str, Any], destination: Path) -> None:
+    """Write one concise conversion CSV row per input file or logical image."""
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    destination.write_text(conversion_csv_text(report), encoding="utf-8-sig", newline="")
+
+
+def conversion_csv_text(report: dict[str, Any]) -> str:
+    """Render a spreadsheet-friendly conversion summary from the JSON report."""
+    fields = [
+        "source_path", "series_id", "image_name", "source_outcome", "image_outcome",
+        "requested_resolution_mode", "effective_resolution_mode", "fallback_used",
+        "bioformats_status", "openslide_status", "dimensions", "level_count",
+        "artifact_disposition", "output_path", "diagnostics",
+    ]
+    buffer = io.StringIO(newline="")
+    writer = csv.DictWriter(buffer, fieldnames=fields)
+    writer.writeheader()
+    requested = report.get("conversion_options", {}).get("requested_resolution_mode", "")
+    for source in report.get("sources", []):
+        images = source.get("images", [])
+        rows = images or [None]
+        for image in rows:
+            image = image or {}
+            attempts = image.get("attempts", [])
+            accepted = next((a for a in reversed(attempts)
+                             if a.get("artifact", {}).get("disposition") == "accepted"), None)
+            attempt = accepted or (attempts[-1] if attempts else {})
+            checks = attempt.get("checks", {})
+            bioformats = checks.get("bioformats", {})
+            openslide = checks.get("openslide", {})
+            artifact = image.get("artifact", attempt.get("artifact", {}))
+            diagnostics = image.get("diagnostics", [])
+            if not diagnostics:
+                diagnostics = attempt.get("diagnostics", [])
+            if not diagnostics and not images:
+                diagnostics = [*source.get("errors", []), *source.get("notes", [])]
+            writer.writerow({
+                "source_path": source.get("path", ""),
+                "series_id": image.get("series_id", ""),
+                "image_name": image.get("name", ""),
+                "source_outcome": source.get("outcome", ""),
+                "image_outcome": image.get(
+                    "outcome", source.get("source_record_outcome", source.get("outcome", ""))
+                ),
+                "requested_resolution_mode": requested,
+                "effective_resolution_mode": image.get("effective_resolution_mode", ""),
+                "fallback_used": image.get("fallback_used", False),
+                "bioformats_status": bioformats.get("status", ""),
+                "openslide_status": openslide.get("status", ""),
+                "dimensions": "x".join(map(str, openslide.get("dimensions", []))),
+                "level_count": openslide.get("level_count", ""),
+                "artifact_disposition": artifact.get("disposition", ""),
+                "output_path": artifact.get("path", ""),
+                "diagnostics": " | ".join(diagnostics) if isinstance(diagnostics, list) else diagnostics,
+            })
+    return buffer.getvalue()
+
+
 def write_run_record(record: RunRecord, destination: Path) -> None:
     """Write one source-to-verification provenance record as JSON.
 

@@ -391,10 +391,14 @@ class ConversionPipeline:
                 record.status = "partial" if completed_conversion else "failed"
             else:
                 rejected_attempts = [attempt for attempt in attempts if not attempt.passed]
-                record.status = "partial" if rejected_attempts else "passed"
+                # An explicitly enabled fallback is part of the requested
+                # conversion policy. If a later attempt passes every required
+                # validator, the final image outcome is passed; the failed
+                # attempt remains visible in the attempt history.
+                record.status = "passed"
                 if rejected_attempts:
                     record.warnings.append(
-                        "A conversion attempt failed before a later attempt passed all required checks."
+                        "An earlier conversion attempt failed before a later attempt passed all required checks."
                     )
         if not any(item.passed for item in attempts):
             record.errors.extend(
@@ -686,7 +690,7 @@ def _dimensions(series: SeriesInfo) -> tuple[int, int] | None:
 
 
 def _now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
 def _emit(
