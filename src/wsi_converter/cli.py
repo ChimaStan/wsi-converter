@@ -23,12 +23,17 @@ from .models import (
     OpenSlideRequirements,
     RunRecord,
     SeriesClassification,
-    SeriesInfo,
     to_primitive,
 )
 from .openslide import OpenSlideChecker
 from .pipeline import ConversionPipeline
-from .reporting import check_csv_text, write_check_csv, write_json
+from .reporting import (
+    check_csv_text,
+    conversion_csv_text,
+    write_check_csv,
+    write_conversion_csv,
+    write_json,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -95,6 +100,8 @@ def build_parser() -> argparse.ArgumentParser:
                          help="Require physical pixel-size metadata during OpenSlide validation.")
     convert.add_argument("--json", nargs="?", const="-", metavar="PATH",
                          help="Write a live, atomically updated report to PATH; without PATH, print final JSON.")
+    convert.add_argument("--csv", nargs="?", const="-", metavar="PATH",
+                         help="Write a compact per-image CSV to PATH; without PATH, print CSV to stdout.")
     _add_bioformats_options(convert)
 
     verify = sub.add_parser("verify", help="Run the shared OpenSlide checks on a file.")
@@ -285,6 +292,7 @@ def _run_convert(args: argparse.Namespace) -> int:
         logger.warning("Discovery: %s", issue)
     pipeline = ConversionPipeline(_checker(args), _backend(args))
     report = _new_conversion_report(args, found.inaccessible, len(found.files))
+    _refresh_conversion_report(report, dry_run=args.dry_run, complete=False)
     report_path = Path(args.json) if args.json and args.json != "-" else None
     if report_path:
         write_json(report, report_path)
@@ -321,14 +329,22 @@ def _run_convert(args: argparse.Namespace) -> int:
     report["state"] = "completed"
     report["finished_at"] = _now()
     report["current"] = None
-    _refresh_conversion_report(report, dry_run=args.dry_run, complete=True)
+    _finalize_conversion_report(report, dry_run=args.dry_run)
     if report_path:
         write_json(report, report_path)
     if args.json == "-":
         print(write_json(report))
+    if args.csv:
+        csv_report = conversion_csv_text(report)
+        if args.csv == "-":
+            print(csv_report, end="")
+        else:
+            write_conversion_csv(report, Path(args.csv))
     failed = bool(
-        report["summary"]["failed"] or report["summary"]["partial"]
-        or report["summary"]["failed_sources"]
+        report["summary"]["logical_wsi_images"]["failed"]
+        or report["summary"]["logical_wsi_images"]["partial"]
+        or report["summary"]["input_files"]["failed"]
+        or report["summary"]["input_files"]["partial"]
     )
     failed = failed or bool(found.inaccessible)
     return 2 if failed else 0
@@ -340,7 +356,7 @@ def _new_conversion_report(
     """Create the first live snapshot for a conversion run."""
     started = _now()
     return {
-        "schema_version": 3,
+        "schema_version": 4,
         "state": "running",
         "outcome": None,
         "provisional_outcome": "running",
@@ -348,32 +364,19 @@ def _new_conversion_report(
         "updated_at": started,
         "finished_at": None,
         "conversion_options": {
-            "resolution_mode": args.resolution_mode,
+            "requested_resolution_mode": args.resolution_mode,
             "compression": args.compression or "uncompressed",
             "fallback_on_validation_failure": args.fallback_on_validation_failure,
             "keep_partial_artifacts": args.keep_partial_artifacts,
             "recursive": args.recursive,
             "dry_run": args.dry_run,
         },
-        "summary": {
-            "sources_processed": 0,
-            "sources_discovered": discovered_sources,
-            "eligible_wsi_images": 0,
-            "images_in_progress": 0,
-            "passed": 0,
-            "partial": 0,
-            "failed": 0,
-            "planned": 0,
-            "skipped": 0,
-            "failed_sources": 0,
-            "passed_sources": 0,
-            "partial_sources": 0,
-            "skipped_sources": 0,
-            "inaccessible_sources": len(inaccessible),
-        },
+        "summary": {},
+        "discovered_sources": discovered_sources,
         "sources": [],
         "inaccessible": to_primitive(inaccessible),
         "current": None,
+        "tools": {},
     }
 
 
@@ -384,125 +387,90 @@ def _update_conversion_report(
     destination: Path | None,
     dry_run: bool,
 ) -> None:
-    """Apply one pipeline progress event and persist a live JSON snapshot."""
-    source = str(payload.get("source", ""))
-    sources = report["sources"]
-    assert isinstance(sources, list)
-    source_report = next((item for item in sources if item["path"] == source), None)
+    """Apply one pipeline event to its owning source and persist live JSON."""
+    record = payload.get("record")
+    source_value = payload.get("source")
+    if source_value is None and isinstance(record, RunRecord):
+        source_value = record.source
+    source = str(source_value) if source_value is not None else ""
+    if not source:
+        logger.error("Ignoring report event %s without a source path", event)
+        return
+
+    source_report = _get_or_create_source_report(report, source)
     if event == "source_started":
-        if source_report is None:
-            source_report = {
-                "path": source, "state": "running", "outcome": "running",
-                "inspection": None, "notes": [], "images": [], "errors": [],
-            }
-            sources.append(source_report)
         report["current"] = {"source": source, "state": "inspecting"}
         print(f"INSPECTING {source}", flush=True)
-    elif source_report is None:
-        source_report = {
-            "path": source, "state": "running", "outcome": "running",
-            "inspection": None, "notes": [], "images": [], "errors": [],
-        }
-        sources.append(source_report)
-
-    if event == "source_inspected" and source_report is not None:
+    elif event == "source_inspected":
         inventory = payload.get("inventory", [])
         source_report["inspection"] = {
-            "status": "passed",
             "series_count": len(inventory) if isinstance(inventory, list) else 0,
             "primary_wsi_count": sum(
                 item.classification == SeriesClassification.WSI for item in inventory
             ) if isinstance(inventory, list) else 0,
-            "series": [
-                _series_report_record(item) for item in inventory
-            ] if isinstance(inventory, list) else [],
         }
-    elif event == "image_started" and source_report is not None:
-        selected = payload["selected"]
-        image = {
-            "series_id": selected.index,
-            "name": selected.name,
-            "state": "running",
-            "outcome": "running",
-            "resolution_mode": payload["resolution_mode"],
-            "attempts": [],
-            "started_at": _now(),
-        }
-        source_report["images"].append(image)
-        report["current"] = {
-            "source": source, "series_id": selected.index,
-            "name": selected.name, "resolution_mode": payload["resolution_mode"],
-            "state": "converting",
-        }
-        print(f"PROCESSING {source} [{selected.name}, series {selected.index}] "
-              f"mode={payload['resolution_mode']}", flush=True)
-    elif event == "attempt_started" and source_report is not None:
+    elif event == "image_started":
         selected = payload["selected"]
         image_entry = _find_report_image(source_report, selected.index)
-        if image_entry is not None:
-            image_entry["current_attempt"] = {
-                "mode": payload["mode"], "strategy": payload["strategy"], "state": "running",
-            }
+        if image_entry is None:
+            source_report["images"].append({
+                "series_id": selected.index,
+                "name": selected.name,
+                "state": "running",
+                "outcome": "running",
+                "attempts": [],
+                "started_at": _now(),
+            })
+        report["current"] = {
+            "source": source, "series_id": selected.index,
+            "name": selected.name, "state": "converting",
+        }
+        print(f"PROCESSING {source} [{selected.name}, series {selected.index}]", flush=True)
+    elif event == "attempt_started":
+        selected = payload["selected"]
         report["current"] = {
             "source": source, "series_id": selected.index, "name": selected.name,
             "mode": payload["mode"], "strategy": payload["strategy"], "state": "converting",
         }
         print(f"  ATTEMPT mode={payload['mode']} strategy={payload['strategy']}", flush=True)
-    elif event == "attempt_completed" and source_report is not None:
+    elif event == "attempt_completed":
         selected = payload["selected"]
+        attempt = payload["attempt"]
         image_entry = _find_report_image(source_report, selected.index)
         if image_entry is not None:
-            image_entry.setdefault("attempts", []).append(_attempt_report_record(payload["attempt"]))
-            image_entry.pop("current_attempt", None)
-    elif event == "image_completed" and source_report is not None:
-        record = payload["record"]
+            image_entry.setdefault("attempts", []).append(_attempt_report_record(attempt))
+        if attempt.conversion and attempt.conversion.backend_version:
+            report["tools"].setdefault("bioformats", attempt.conversion.backend_version)
+    elif event == "image_completed":
+        assert isinstance(record, RunRecord)
         if record.selected_series is None:
-            source_report["outcome"] = record.status
-            source_report["notes"].extend(record.warnings)
+            source_report["source_record_outcome"] = record.status
+            source_report["notes"] = _concise_diagnostics(record.warnings)
+            source_report["errors"] = _concise_diagnostics(record.errors)
         else:
-            image_record = _image_report_record(record)
-            image_entry = _find_report_image(source_report, record.selected_series)
-            if image_entry is None:
-                source_report["images"].append(image_record)
-            else:
-                image_entry.clear()
-                image_entry.update(image_record)
+            _upsert_report_image(source_report, _image_report_record(record))
         report["current"] = None
         _print_run(record, dry_run)
-    elif event == "source_completed" and source_report is not None:
+    elif event == "source_completed":
         records = payload.get("records")
-        if isinstance(records, list):
-            image_statuses = [record.status for record in records]
-        else:
-            record = payload.get("record")
-            image_statuses = [record.status] if record is not None else []
-            if record is not None and record.errors:
-                if record.selected_series is None:
-                    source_report["errors"].extend(_concise_diagnostics(record.errors))
-                if record.selected_series is not None:
-                    _upsert_report_image(source_report, _image_report_record(record))
-            if record is not None and record.selected_series is None:
-                source_report["notes"].extend(record.warnings)
+        if not isinstance(records, list):
+            records = [record] if isinstance(record, RunRecord) else []
+        for completed_record in records:
+            _record_completed_result(source_report, completed_record)
         source_report["state"] = "completed"
-        source_report["outcome"] = _aggregate_outcome(
-            image_statuses, bool(source_report["errors"]), dry_run
-        )
-        current = report.get("current")
-        if isinstance(current, dict) and current.get("source") == source:
-            report["current"] = None
-    elif event == "source_failed" and source_report is not None:
+        report["current"] = None
+    elif event == "source_failed":
         errors = _concise_diagnostics(payload.get("errors", []))
         current = report.get("current")
         if isinstance(current, dict) and current.get("source") == source:
             series_id = current.get("series_id")
             image_entry = _find_report_image(source_report, series_id)
             if image_entry is not None:
-                image_entry["state"] = "completed"
-                image_entry["outcome"] = "failed"
-                image_entry["artifact"] = {"disposition": "not-created", "path": None}
-                image_entry["attempts"] = []
-                image_entry["diagnostics"] = errors
-                image_entry["finished_at"] = _now()
+                image_entry.update({
+                    "state": "completed", "outcome": "failed",
+                    "artifact": {"disposition": "not-created", "path": None},
+                    "diagnostics": errors, "finished_at": _now(),
+                })
             else:
                 source_report["errors"].extend(errors)
         else:
@@ -517,6 +485,33 @@ def _update_conversion_report(
             write_json(report, destination)
         except OSError:
             logger.exception("Could not update live conversion report %s", destination)
+
+
+def _get_or_create_source_report(report: dict[str, Any], path: str) -> dict[str, Any]:
+    """Return the report record for a source path, creating it if necessary."""
+    sources = report["sources"]
+    source_report = next((item for item in sources if item["path"] == path), None)
+    if source_report is None:
+        source_report = {
+            "path": path,
+            "state": "running",
+            "outcome": "running",
+            "images": [],
+            "notes": [],
+            "errors": [],
+        }
+        sources.append(source_report)
+    return source_report
+
+
+def _record_completed_result(source_report: dict[str, Any], record: RunRecord) -> None:
+    """Reconcile a completed pipeline record into its source entry."""
+    if record.selected_series is None:
+        source_report["source_record_outcome"] = record.status
+        source_report["notes"] = _concise_diagnostics(record.warnings)
+        source_report["errors"] = _concise_diagnostics(record.errors)
+    else:
+        _upsert_report_image(source_report, _image_report_record(record))
 
 
 def _image_report_record(record: RunRecord) -> dict[str, Any]:
@@ -537,6 +532,9 @@ def _image_report_record(record: RunRecord) -> dict[str, Any]:
         "outcome": record.status,
         "started_at": record.started_at,
         "finished_at": record.finished_at,
+        "fallback_used": any(
+            attempt.mode != record.resolution_mode for attempt in record.conversion_attempts
+        ),
         "attempts": [_attempt_report_record(attempt) for attempt in record.conversion_attempts],
     }
     if record.effective_resolution_mode is not None:
@@ -558,24 +556,6 @@ def _image_report_record(record: RunRecord) -> dict[str, Any]:
     return result
 
 
-def _series_report_record(series: SeriesInfo) -> dict[str, Any]:
-    """Return just the source-series facts needed to understand selection."""
-    result: dict[str, Any] = {
-        "series_id": series.index,
-        "name": series.name,
-        "classification": series.classification.value,
-    }
-    if series.width is not None and series.height is not None:
-        result["dimensions"] = [series.width, series.height]
-    if series.resolution_count is not None:
-        result["resolution_count"] = series.resolution_count
-    if series.mpp_x is not None or series.mpp_y is not None:
-        result["mpp"] = [series.mpp_x, series.mpp_y]
-    if series.classification_reason:
-        result["classification_reason"] = series.classification_reason
-    return result
-
-
 def _attempt_report_record(attempt: ConversionAttempt) -> dict[str, Any]:
     """Serialize conversion and independent checks without raw process output."""
     conversion = attempt.conversion
@@ -586,8 +566,6 @@ def _attempt_report_record(attempt: ConversionAttempt) -> dict[str, Any]:
     }
     if conversion is not None:
         conversion_report["series_id"] = conversion.series
-        if conversion.backend_version:
-            conversion_report["backend_version"] = conversion.backend_version
         if conversion.error:
             conversion_report["message"] = _concise_diagnostic(conversion.error)
     result: dict[str, Any] = {
@@ -622,13 +600,13 @@ def _bioformats_check_report(verification: BioFormatsVerification | None) -> dic
     result: dict[str, Any] = {
         "status": "passed" if verification.passed else "failed",
     }
-    if verification.expected_dimensions is not None:
+    if not verification.passed and verification.expected_dimensions is not None:
         result["expected_dimensions"] = to_primitive(verification.expected_dimensions)
-    if verification.observed_dimensions:
+    if not verification.passed and verification.observed_dimensions:
         result["observed_dimensions"] = to_primitive(verification.observed_dimensions)
-    if verification.expected_resolution_count is not None:
+    if not verification.passed and verification.expected_resolution_count is not None:
         result["expected_resolution_count"] = verification.expected_resolution_count
-    if verification.observed_resolution_counts:
+    if not verification.passed and verification.observed_resolution_counts:
         result["observed_resolution_counts"] = verification.observed_resolution_counts
     if verification.error:
         result["message"] = _concise_diagnostic(verification.error)
@@ -710,83 +688,100 @@ def _upsert_report_image(source_report: dict[str, Any], image: dict[str, Any]) -
 def _refresh_conversion_report(
     report: dict[str, Any], *, dry_run: bool, complete: bool
 ) -> None:
-    """Recompute hierarchical outcomes and counts from completed image records."""
+    """Recompute clearly separated input-file and logical-image summaries."""
     sources = report["sources"]
-    image_statuses: list[str] = []
-    in_progress = 0
+    image_records: list[dict[str, Any]] = []
     for source in sources:
-        images = source["images"]
+        images = source.get("images", [])
         statuses = [str(image.get("outcome", "running")) for image in images]
-        image_statuses.extend(statuses)
-        in_progress += sum(image.get("state") == "running" for image in images)
-        source_errors = bool(source.get("errors"))
-        source["summary"] = {
-            "eligible_wsi_images": len(images),
-            "passed": statuses.count("passed"),
-            "partial": statuses.count("partial"),
-            "failed": statuses.count("failed"),
-            "planned": statuses.count("planned"),
-            "skipped": statuses.count("skipped"),
-            "images_in_progress": sum(image.get("state") == "running" for image in images),
-        }
+        image_records.extend(images)
         if source.get("state") == "completed":
-            source["outcome"] = _aggregate_outcome(statuses, source_errors, dry_run)
-    summary = {
-        "sources_processed": len(sources),
-        "sources_discovered": report["summary"]["sources_discovered"],
-        "eligible_wsi_images": len(image_statuses),
-        "images_in_progress": in_progress,
+            source["outcome"] = _aggregate_outcome(
+                statuses, bool(source.get("errors")), dry_run
+            ) if statuses else (
+                "failed" if source.get("errors") else source.get("source_record_outcome", "skipped")
+            )
+
+    image_statuses = [str(item.get("outcome", "running")) for item in image_records]
+    input_statuses = [str(source.get("outcome", "running")) for source in sources]
+    source_processed = sum(source.get("state") == "completed" for source in sources)
+    image_summary = {
+        "total": len(image_records),
         "passed": image_statuses.count("passed"),
         "partial": image_statuses.count("partial"),
         "failed": image_statuses.count("failed"),
-        "planned": image_statuses.count("planned"),
         "skipped": image_statuses.count("skipped"),
-        "failed_sources": sum(source.get("outcome") == "failed" for source in sources),
-        "passed_sources": sum(source.get("outcome") == "passed" for source in sources),
-        "partial_sources": sum(source.get("outcome") == "partial" for source in sources),
-        "skipped_sources": sum(source.get("outcome") == "skipped" for source in sources),
-        "inaccessible_sources": len(report["inaccessible"]),
+        "planned": image_statuses.count("planned"),
+        "fallback_used": sum(bool(image.get("fallback_used")) for image in image_records),
     }
-    report["summary"] = summary
+    input_summary = {
+        "discovered": int(report.get("discovered_sources", len(sources))),
+        "processed": source_processed,
+        "passed": input_statuses.count("passed"),
+        "partial": input_statuses.count("partial"),
+        "failed": input_statuses.count("failed"),
+        "skipped": input_statuses.count("skipped"),
+        "planned": input_statuses.count("planned"),
+        "inaccessible": len(report.get("inaccessible", [])),
+    }
+    if not complete:
+        image_summary["in_progress"] = image_statuses.count("running")
+        input_summary["in_progress"] = input_statuses.count("running")
+    report["summary"] = {
+        "input_files": input_summary,
+        "logical_wsi_images": image_summary,
+    }
+
     errors_exist = bool(
-        summary["failed"] or summary["partial"] or summary["failed_sources"]
-        or summary["inaccessible_sources"]
+        image_summary["partial"] or image_summary["failed"]
+        or input_summary["partial"] or input_summary["failed"] or input_summary["inaccessible"]
     )
     if complete:
         report["outcome"] = _aggregate_outcome(
-            image_statuses,
-            errors_exist or any(source.get("errors") for source in sources),
-            dry_run,
+            image_statuses, errors_exist, dry_run
         )
         report.pop("provisional_outcome", None)
+        report.pop("discovered_sources", None)
     else:
         report["provisional_outcome"] = "partial" if errors_exist else "running"
 
 
+def _finalize_conversion_report(report: dict[str, Any], *, dry_run: bool) -> None:
+    """Ensure the terminal report contains no orphaned in-progress records."""
+    for source in report["sources"]:
+        for image in source.get("images", []):
+            if image.get("state") == "running":
+                image.update({
+                    "state": "completed", "outcome": "failed",
+                    "artifact": {"disposition": "not-created", "path": None},
+                    "diagnostics": ["Run ended before this image reached a final result."],
+                    "finished_at": _now(),
+                })
+        if source.get("state") == "running":
+            source["state"] = "completed"
+    _refresh_conversion_report(report, dry_run=dry_run, complete=True)
+
+
 def _aggregate_outcome(statuses: list[str], has_errors: bool, dry_run: bool) -> str:
-    """Roll up child outcomes into one stable run or source outcome."""
+    """Roll up child outcomes; successful fallback attempts remain passed."""
     if statuses and all(status == "skipped" for status in statuses) and not has_errors:
         return "skipped"
     if statuses and dry_run and not has_errors and all(
         status in {"planned", "skipped"} for status in statuses
     ):
         return "planned"
-    completed_work = any(status in {"passed", "partial"} for status in statuses)
-    if completed_work:
-        if has_errors or any(status in {"partial", "failed"} for status in statuses):
-            return "partial"
+    if has_errors or "failed" in statuses or "partial" in statuses:
+        return "partial" if any(status in {"passed", "partial"} for status in statuses) else "failed"
+    if "passed" in statuses:
         return "passed"
-    if has_errors or "failed" in statuses:
-        return "failed"
-    if statuses and all(status == "skipped" for status in statuses):
-        return "skipped"
     if "planned" in statuses:
         return "planned"
     return "skipped"
 
 
 def _now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    """Return a UTC ISO 8601 timestamp with the compact ``Z`` suffix."""
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
 def _backend(args: argparse.Namespace) -> BioFormatsBackend:

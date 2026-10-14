@@ -11,3 +11,5 @@ dist/
 .vscode/
 .env
 bftools/
+scripts/generate_report_examples.py
+docs/examples/reports/  

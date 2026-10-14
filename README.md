@@ -160,6 +160,7 @@ wsi-converter COMMAND --help
 | `--overwrite` | Replace an existing accepted output at the selected mode's destination. |
 | `--require-mpp` | Require physical pixel-size metadata during OpenSlide validation. |
 | `--json [PATH]` | Write a live, atomically updated report; without a path, print final JSON to stdout. |
+| `--csv [PATH]` | Write a compact per-image CSV; without a path, print CSV to stdout. |
 | `--bioformats-home PATH` | Bio-Formats command directory; defaults to `BIOFORMATS_HOME` or executable discovery on `PATH`. |
 | `--bfconvert PATH` | Explicit path to `bfconvert`. |
 | `--showinf PATH` | Explicit path to `showinf`. |
@@ -255,9 +256,9 @@ wsi-converter convert path/to/wsis/ --recursive --only-incompatible \
   --output path/to/converted/ --dry-run
 ```
 
-`--only-incompatible` bases its decision on actual OpenSlide assessment. A dry run reports every planned logical image and output path without converting. Recursive conversion isolates failures by image and continues with remaining images and files. Use `--json PATH` to write a live, atomically updated hierarchical report: run → source → logical WSI → attempt → independent checks and artifact disposition. `passed` means every eligible image passed its selected mode's required checks; `partial` means at least one attempt or image failed while work completed; `failed` means no conversion completed successfully. `planned` and `skipped` distinguish dry runs and runs with no conversion work. The report includes per-source and per-image counts. Bare `--json` prints the final JSON to stdout; progress remains visible in the terminal.
+`--only-incompatible` bases its decision on actual OpenSlide assessment. A dry run reports every planned logical image and output path without converting. Recursive conversion isolates failures by image and continues with remaining images and files. Use `--json PATH` to write a live, atomically updated report: run → input file → logical WSI image → attempt → independent checks and artifact disposition. The summary separates input-file counts from logical-image counts. When an enabled fallback succeeds, the image outcome is `passed`; the attempts retain the failed first mode, while `effective_resolution_mode` and `fallback_used` show which output was accepted. `partial` means some requested work completed but at least one image or input failed; `failed` means no image passed. `planned` and `skipped` distinguish dry runs and inputs with no conversion work. Bare `--json` prints the final JSON to stdout; progress remains visible in the terminal. `--csv PATH` writes one spreadsheet-friendly row per logical image, or one row for an input that produced no logical images.
 
-The conversion JSON is intentionally compact: its source inventory includes series identity, role, dimensions, resolution count, and calibration where available, but omits raw vendor metadata and full process output. Use `inspect --json PATH` when you need the detailed Bio-Formats inventory and metadata.
+The conversion JSON is intentionally compact: it records selected series, attempt outcomes, final validation results, artifact disposition, and concise diagnostics. It omits the full source-series inventory, raw vendor metadata, and process output. Use `inspect --json PATH` when you need the detailed Bio-Formats inventory and metadata. Synthetic report examples are available in [`docs/examples/reports/`](docs/examples/reports/).
 
 Run a standalone verification:
 
