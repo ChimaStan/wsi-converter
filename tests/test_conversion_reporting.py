@@ -5,6 +5,7 @@ import io
 from argparse import Namespace
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
 from wsi_converter.backends.bioformats.backend import _now as backend_now
 from wsi_converter.cli import (
@@ -19,7 +20,7 @@ from wsi_converter.pipeline import _now as pipeline_now
 from wsi_converter.reporting import conversion_csv_text
 
 
-def _report(*, dry_run: bool = False) -> dict:
+def _report(*, dry_run: bool = False) -> dict[str, Any]:
     args = Namespace(
         resolution_mode="preserve", compression=None,
         fallback_on_validation_failure=True, keep_partial_artifacts=False,
