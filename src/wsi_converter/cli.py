@@ -28,7 +28,11 @@ from .models import (
 from .openslide import OpenSlideChecker
 from .pipeline import ConversionPipeline
 from .reporting import (
-    check_csv_text, conversion_csv_text, write_check_csv, write_conversion_csv, write_json,
+    check_csv_text,
+    conversion_csv_text,
+    write_check_csv,
+    write_conversion_csv,
+    write_json,
 )
 
 logger = logging.getLogger(__name__)

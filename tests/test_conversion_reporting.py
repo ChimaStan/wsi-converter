@@ -1,19 +1,19 @@
 """Synthetic tests for compact conversion report outcomes and CSV summaries."""
 
-from argparse import Namespace
 import csv
-from datetime import datetime, timezone
 import io
+from argparse import Namespace
+from datetime import datetime, timezone
 from pathlib import Path
 
+from wsi_converter.backends.bioformats.backend import _now as backend_now
 from wsi_converter.cli import (
     _finalize_conversion_report,
     _image_report_record,
-    _now,
     _new_conversion_report,
+    _now,
     _update_conversion_report,
 )
-from wsi_converter.backends.bioformats.backend import _now as backend_now
 from wsi_converter.models import ConversionAttempt, RunRecord
 from wsi_converter.pipeline import _now as pipeline_now
 from wsi_converter.reporting import conversion_csv_text
