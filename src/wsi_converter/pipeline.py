@@ -398,7 +398,7 @@ class ConversionPipeline:
                 record.status = "passed"
                 if rejected_attempts:
                     record.warnings.append(
-                        "An earlier conversion attempt failed before a later attempt passed all required checks."
+                        "A conversion attempt failed before a later attempt passed all required checks."
                     )
         if not any(item.passed for item in attempts):
             record.errors.extend(
