@@ -162,7 +162,7 @@ def test_missing_optional_metadata_yields_partial_with_accepted_artifact(
                 ],
             )
 
-    pipeline.output_checker = MetadataGapChecker()
+    pipeline.output_checker = cast(OpenSlideChecker, MetadataGapChecker())
 
     record = pipeline.convert(
         tmp_path / "sample.vsi", tmp_path / "out", series_index=0
