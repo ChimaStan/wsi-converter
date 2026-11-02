@@ -77,7 +77,8 @@ def check_csv_text(results: list[OpenSlideAssessment]) -> str:
     buffer = io.StringIO(newline="")
     fields = [
         "file", "extension", "detected_format", "openslide_status", "dimensions", "level_count",
-        "mpp_x", "mpp_y", "tile_width", "tile_height", "read_test_status", "vsi_companion",
+        "mpp_x", "mpp_y", "objective_power", "aperio_app_mag", "tile_width", "tile_height",
+        "read_test_status", "vsi_companion",
         "warnings", "errors", "final_status",
     ]
     writer = csv.DictWriter(buffer, fieldnames=fields)
@@ -91,6 +92,8 @@ def check_csv_text(results: list[OpenSlideAssessment]) -> str:
                 "level_count": item.level_count if item.level_count is not None else "",
                 "mpp_x": item.mpp_x if item.mpp_x is not None else "",
                 "mpp_y": item.mpp_y if item.mpp_y is not None else "",
+                "objective_power": item.objective_power if item.objective_power is not None else "",
+                "aperio_app_mag": item.aperio_app_mag if item.aperio_app_mag is not None else "",
                 "tile_width": item.tile_width if item.tile_width is not None else "",
                 "tile_height": item.tile_height if item.tile_height is not None else "",
                 "read_test_status": reads, "vsi_companion": item.vsi_companion or "",

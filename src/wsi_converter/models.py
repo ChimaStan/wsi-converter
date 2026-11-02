@@ -105,6 +105,8 @@ class OpenSlideAssessment:
         tile_height: Vendor tile height metadata, when exposed.
         mpp_x: Physical pixel width in microns, when available.
         mpp_y: Physical pixel height in microns, when available.
+        objective_power: Objective magnification from OpenSlide, when available.
+        aperio_app_mag: Aperio magnification metadata, when available.
         associated_images: Names exposed by OpenSlide for associated images.
         tests: Individual check outcomes.
         warnings: Non-fatal diagnostics.
@@ -124,6 +126,8 @@ class OpenSlideAssessment:
     tile_height: int | None = None
     mpp_x: float | None = None
     mpp_y: float | None = None
+    objective_power: float | None = None
+    aperio_app_mag: float | None = None
     associated_images: list[str] = field(default_factory=list)
     tests: list[CheckResult] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)

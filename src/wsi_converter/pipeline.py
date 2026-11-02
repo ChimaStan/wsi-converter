@@ -396,6 +396,11 @@ class ConversionPipeline:
                 # validator, the final image outcome is passed; the failed
                 # attempt remains visible in the attempt history.
                 record.status = "passed"
+                metadata_gaps = _optional_metadata_gaps(accepted.openslide_assessment)
+                if metadata_gaps:
+                    record.status = "partial"
+                    record.warnings.extend(metadata_gaps)
+                    accepted.outcome = "partial"
                 if rejected_attempts:
                     record.warnings.append(
                         "A conversion attempt failed before a later attempt passed all required checks."
@@ -551,6 +556,18 @@ def _verify_bioformats_output(
         observed_resolution_counts=observed_counts,
         error=error,
     )
+
+
+def _optional_metadata_gaps(assessment: OpenSlideAssessment | None) -> list[str]:
+    """Return diagnostics for unavailable optional OpenSlide metadata checks."""
+    if assessment is None:
+        return []
+    optional_names = {"mpp_x", "mpp_y", "objective_power", "aperio_app_mag"}
+    return [
+        f"Optional OpenSlide metadata check '{check.name}' was unavailable or invalid."
+        for check in assessment.tests
+        if check.name in optional_names and check.status != "PASS" and not check.required
+    ]
 
 
 def _flat_index(inventory: list[SeriesInfo], selected: SeriesInfo) -> int:

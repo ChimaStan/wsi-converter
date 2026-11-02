@@ -35,6 +35,8 @@ class FakeSlide:
             "openslide.vendor": "test",
             "openslide.mpp-x": "0.25",
             "openslide.mpp-y": "0.25",
+            "openslide.objective-power": "20",
+            "aperio.AppMag": "20",
         }
         self.reads: list[tuple[tuple[int, int], int, tuple[int, int]]] = []
 
@@ -86,3 +88,60 @@ def test_required_mpp_is_an_incompatibility(
 
     assert result.status == AssessmentStatus.INCOMPATIBLE
     assert any("mpp" in error for error in result.errors)
+
+
+def test_missing_optional_scale_metadata_is_reported_as_warning(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Missing MPP and objective metadata do not make a readable slide incompatible."""
+    image = tmp_path / "slide.tif"
+    image.touch()
+    slide = FakeSlide()
+    slide.properties = {
+        "openslide.vendor": "test",
+        "openslide.mpp-x": "0.25",
+    }
+    monkeypatch.setitem(sys.modules, "openslide", SimpleNamespace(OpenSlide=lambda path: slide))
+
+    result = OpenSlideChecker().check(image)
+    checks = {check.name: check for check in result.tests}
+
+    assert result.status == AssessmentStatus.COMPATIBLE_WITH_WARNINGS
+    assert result.mpp_x == 0.25
+    assert result.mpp_y is None
+    assert result.objective_power is None
+    assert checks["mpp_x"].status == "PASS"
+    assert checks["mpp_y"].status == "SKIP"
+    assert checks["objective_power"].status == "SKIP"
+    assert checks["aperio_app_mag"].status == "SKIP"
+    assert not result.errors
+    assert len(result.warnings) == 3
+
+
+def test_nonpositive_or_nonfinite_optional_metadata_is_reported(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Malformed or unreasonable optional scale values remain warnings."""
+    image = tmp_path / "slide.tif"
+    image.touch()
+    slide = FakeSlide()
+    slide.properties.update({
+        "openslide.mpp-x": "0",
+        "openslide.mpp-y": "nan",
+        "openslide.objective-power": "not-a-number",
+        "aperio.AppMag": "-20",
+    })
+    monkeypatch.setitem(sys.modules, "openslide", SimpleNamespace(OpenSlide=lambda path: slide))
+
+    result = OpenSlideChecker().check(image)
+    checks = {check.name: check for check in result.tests}
+
+    assert result.status == AssessmentStatus.COMPATIBLE_WITH_WARNINGS
+    assert result.mpp_x == 0
+    assert result.mpp_y is None
+    assert result.objective_power is None
+    assert result.aperio_app_mag == -20
+    assert all(checks[name].status == "SKIP" for name in (
+        "mpp_x", "mpp_y", "objective_power", "aperio_app_mag"
+    ))
+    assert not result.errors

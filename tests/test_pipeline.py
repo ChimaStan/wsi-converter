@@ -9,6 +9,7 @@ import pytest
 from wsi_converter.backends.base import WSIBackend
 from wsi_converter.models import (
     AssessmentStatus,
+    CheckResult,
     ConversionResult,
     OpenSlideAssessment,
     OpenSlideRequirements,
@@ -135,6 +136,45 @@ def test_convert_all_handles_each_primary_image_and_excludes_ancillary(tmp_path:
     assert all(record.output_assessment is not None for record in records)
     assert all("Excluded associated image 'label'" in record.warnings[0] for record in records)
     assert {preserve for _, preserve in backend.calls} == {True}
+
+
+def test_missing_optional_metadata_yields_partial_with_accepted_artifact(
+    tmp_path: Path,
+) -> None:
+    """Optional metadata gaps are partial success, not conversion failure."""
+    backend = FakeBackend()
+    pipeline = _pipeline(backend)
+
+    class MetadataGapChecker(Checker):
+        def check(
+            self, path: Path, _requirements: OpenSlideRequirements | None = None
+        ) -> OpenSlideAssessment:
+            return OpenSlideAssessment(
+                path=path,
+                status=AssessmentStatus.COMPATIBLE_WITH_WARNINGS,
+                dimensions=(10000, 8000),
+                level_count=3,
+                tests=[
+                    CheckResult("mpp_x", "PASS", False, "0.25"),
+                    CheckResult("mpp_y", "SKIP", False, "missing"),
+                    CheckResult("objective_power", "SKIP", False, "missing"),
+                    CheckResult("aperio_app_mag", "SKIP", False, "missing"),
+                ],
+            )
+
+    pipeline.output_checker = cast(OpenSlideChecker, MetadataGapChecker())
+
+    record = pipeline.convert(
+        tmp_path / "sample.vsi", tmp_path / "out", series_index=0
+    )
+
+    assert record.status == "partial"
+    assert record.artifact_disposition == "accepted"
+    assert record.artifact_path is not None and record.artifact_path.exists()
+    assert not record.errors
+    assert record.conversion_attempts[0].passed
+    assert record.conversion_attempts[0].outcome == "partial"
+    assert len(record.warnings) == 3
 
 
 def test_pipeline_propagates_compression_to_each_image(tmp_path: Path) -> None:
