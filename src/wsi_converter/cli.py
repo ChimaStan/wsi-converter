@@ -633,6 +633,24 @@ def _openslide_check_report(assessment: OpenSlideAssessment | None) -> dict[str,
         result["level_count"] = assessment.level_count
     if assessment.mpp_x is not None or assessment.mpp_y is not None:
         result["mpp"] = [assessment.mpp_x, assessment.mpp_y]
+    metadata_values = {
+        "mpp_x": assessment.mpp_x,
+        "mpp_y": assessment.mpp_y,
+        "objective_power": assessment.objective_power,
+        "aperio_app_mag": assessment.aperio_app_mag,
+    }
+    metadata_names = set(metadata_values)
+    metadata_checks = {
+        check.name: check for check in assessment.tests if check.name in metadata_names
+    }
+    result["metadata"] = {
+        name: {
+            "value": value,
+            "status": metadata_checks[name].status.lower()
+            if name in metadata_checks else "not_checked",
+        }
+        for name, value in metadata_values.items()
+    }
     if failed_checks:
         result["failed_checks"] = failed_checks
     elif assessment.errors:

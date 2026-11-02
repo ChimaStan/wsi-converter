@@ -13,9 +13,16 @@ from wsi_converter.cli import (
     _image_report_record,
     _new_conversion_report,
     _now,
+    _openslide_check_report,
     _update_conversion_report,
 )
-from wsi_converter.models import ConversionAttempt, RunRecord
+from wsi_converter.models import (
+    AssessmentStatus,
+    CheckResult,
+    ConversionAttempt,
+    OpenSlideAssessment,
+    RunRecord,
+)
 from wsi_converter.pipeline import _now as pipeline_now
 from wsi_converter.reporting import conversion_csv_text
 
@@ -35,6 +42,29 @@ def test_runtime_timestamps_use_utc_z_suffix() -> None:
         assert not timestamp.endswith("+00:00")
         parsed = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
         assert parsed.tzinfo == timezone.utc
+
+
+def test_compact_output_report_includes_optional_metadata_values_and_statuses() -> None:
+    assessment = OpenSlideAssessment(
+        path=Path("slide.ome.tiff"),
+        status=AssessmentStatus.COMPATIBLE_WITH_WARNINGS,
+        mpp_x=0.25,
+        mpp_y=None,
+        objective_power=20.0,
+        tests=[
+            CheckResult("mpp_x", "PASS", False, "valid"),
+            CheckResult("mpp_y", "SKIP", False, "missing"),
+            CheckResult("objective_power", "PASS", False, "valid"),
+            CheckResult("aperio_app_mag", "SKIP", False, "missing"),
+        ],
+    )
+
+    report = _openslide_check_report(assessment)
+
+    assert report["metadata"]["mpp_x"] == {"value": 0.25, "status": "pass"}
+    assert report["metadata"]["mpp_y"] == {"value": None, "status": "skip"}
+    assert report["metadata"]["objective_power"] == {"value": 20.0, "status": "pass"}
+    assert report["metadata"]["aperio_app_mag"] == {"value": None, "status": "skip"}
 
 
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import math
 from pathlib import Path
 from typing import Any
 
@@ -76,6 +77,8 @@ class OpenSlideChecker:
             result.downsamples = [float(value) for value in slide.level_downsamples]
             result.mpp_x = _float_or_none(props.get("openslide.mpp-x"))
             result.mpp_y = _float_or_none(props.get("openslide.mpp-y"))
+            result.objective_power = _float_or_none(props.get("openslide.objective-power"))
+            result.aperio_app_mag = _float_or_none(props.get("aperio.AppMag"))
             result.associated_images = sorted(slide.associated_images)
             result.tile_width = _int_or_none(props.get("openslide.level[0].tile-width"))
             result.tile_height = _int_or_none(props.get("openslide.level[0].tile-height"))
@@ -85,7 +88,16 @@ class OpenSlideChecker:
                                    req.require_dimensions, "Valid base-level dimensions are available.")
             self._requirement_test(result, "pyramid", result.level_count > 1,
                                    req.require_pyramid, f"{result.level_count} level(s) detected.")
-            self._requirement_test(result, "mpp", result.mpp_x is not None and result.mpp_y is not None,
+            self._metadata_test(result, "mpp_x", "openslide.mpp-x", result.mpp_x,
+                                req.require_mpp)
+            self._metadata_test(result, "mpp_y", "openslide.mpp-y", result.mpp_y,
+                                req.require_mpp)
+            self._metadata_test(result, "objective_power", "openslide.objective-power",
+                                result.objective_power, False)
+            self._metadata_test(result, "aperio_app_mag", "aperio.AppMag",
+                                result.aperio_app_mag, False)
+            self._requirement_test(result, "mpp", _valid_positive(result.mpp_x)
+                                   and _valid_positive(result.mpp_y),
                                    req.require_mpp, "Physical pixel size metadata.")
             self._requirement_test(result, "associated_images", bool(result.associated_images),
                                    req.require_associated_images,
@@ -137,7 +149,29 @@ class OpenSlideChecker:
             message = f"Required capability unavailable: {name}."
             if required:
                 result.errors.append(message)
-            elif name == "mpp":
+
+    @staticmethod
+    def _metadata_test(
+        result: OpenSlideAssessment,
+        name: str,
+        property_name: str,
+        value: float | None,
+        required: bool,
+    ) -> None:
+        """Record whether an optional numeric metadata property is usable."""
+        passed = _valid_positive(value)
+        status = "PASS" if passed else ("FAIL" if required else "SKIP")
+        details = (
+            f"{property_name} has a finite positive value ({value})."
+            if passed
+            else f"{property_name} is missing or is not a finite positive value."
+        )
+        result.tests.append(CheckResult(name, status, required, details))
+        if not passed:
+            message = f"Optional metadata unavailable or invalid: {property_name}."
+            if required:
+                result.errors.append(f"Required metadata unavailable or invalid: {property_name}.")
+            else:
                 result.warnings.append(message)
 
 
@@ -184,9 +218,15 @@ def _float_or_none(value: Any) -> float | None:
         Parsed float, or ``None`` for missing or malformed values.
     """
     try:
-        return float(value) if value is not None else None
+        parsed = float(value) if value is not None else None
+        return parsed if parsed is not None and math.isfinite(parsed) else None
     except (TypeError, ValueError):
         return None
+
+
+def _valid_positive(value: float | None) -> bool:
+    """Whether a parsed physical-scale value is finite and greater than zero."""
+    return value is not None and math.isfinite(value) and value > 0
 
 
 def _int_or_none(value: Any) -> int | None:
